@@ -1,0 +1,259 @@
+---
+title: "Analisi di regressione per dati spaziali"
+author: "E.Chiola & P.Iezzi"
+date: "15/7/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+# Analisi dataset: Boston
+Nella seguente analisi il dataset in esame è denominato 'Boston' e raccoglie osservazioni inerenti le case e i vicinati nella città di Boston. Il documento mostrerà l'analisi del valore delle case (MEDV) in relazione alle altre variabili. 
+Il dataset contiene 506 osservazioni per 23 variabili:
+<ul>
+<li>ID: Identità sequenziale</li>
+
+<li>TOWN: Un fattore con i livelli suddivisi per città (in questo caso solo Boston, costante)</li> 
+
+<li>TOWNNO: Un vettore numerico corrispondente a TOWN</li> 
+
+<li>TRACT: Un vettore numerico di ID</li> 
+
+<li>LON: Longitudine</li> 
+
+<li>LAT: Latitudine </li>
+
+<li>X: X Coordinate (UTM Zone 19) </li>
+
+<li>Y: Y Coordinate (UTM Zone 19) </li> 
+
+<li>MEDV: Un vettore numerico del valore mediano delle case di proprietà in migliaia di dollari</li>
+
+<li>CMEDV: Un vettore numerico del valore mediano corretto delle case di proprietà in migliaia di dollari</li>
+
+<li>CRIM: Un vettore numerico dei crimini pro-capite</li>
+
+<li>ZN: Un vettore numerico di proporzioni di terreni residenziali suddivisi in zone per lotti superiori a 25000 piedi quadrati per città (costante per tutti i tratti di Boston)</li>
+
+<li>INDUS: Un vettore numerico di proporzioni di acri non al dettaglio per città (costante per tutti i tratti di Boston)</li>
+
+<li>CHAS: Un fattoriale con livello 1 se l'area confina con il fiume Charles, 0 altrimenti</li> 
+
+<li>NOX: Un vettore numerico della concentrazione di ossidi nitrici (parti per 10 milioni)</li>
+
+<li>RM: Un vettore numerico della media di stanze per abitazione</li>
+
+<li>AGE: Un vettore numerico della proporzione di abitazioni di proprietà occupate costruire prima del 1940</li>
+
+<li>DIS: Un vettore numerico delle distanze pesate dai 5 centri per l'impiego di Boston</li>
+
+<li>RAD: Un vettore numerico indice di accessibilità alle autostrade </li>
+
+<li>TAX: Un vettore numerico sull'entità delle tasse di proprietà per 10,000 dollari</li>
+
+<li>PTRATIO: Un vettore numerico del rapporto alunno-insegnante</li>
+
+<li>B: Un vettore numerico ottenuto dall'equazione 1000*(Bk - 0.63)^2 con Bk indicante la popolazione afroamericana</li>
+
+<li>LSTAT: Un vettore numerico del valore percentuale della popolazione in uno stato di povertà</li>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Importo le librerie
+```{r echo=TRUE,message=FALSE,warning=FALSE, }
+#pulisco l'ambiente di lavoro
+rm(list=ls())
+#importo le librerie
+library(spdep)
+library(spatialreg)
+library(tseries)
+library(lmtest)
+```
+
+### Importo il dataset
+```{r warning=FALSE, message=FALSE}
+library(readr)
+boston <- read_delim("C:/Users/Patrizio/Desktop/TUTTO/Ud'A/CLEBA/
+                     SUPERATE/DATA SCIENCE/3 progetto - Data science/boston.csv", 
+    ";", escape_double = FALSE, locale = locale(decimal_mark = ","), 
+    trim_ws = TRUE)
+attach(boston) 
+options(scipen = 10) #annotazione numerica
+
+```
+
+```{r}
+#creazione matrice di contiguità
+coord1<-as.matrix(boston[,7:8])
+k10<-knearneigh(coord1, k=10) #nearest neighbour
+k10_nb<-knn2nb(k10)
+nn10w<-nb2listw(k10_nb,style="W") #matrice standardizzata per riga
+nn10w_binary<-nb2listw(k10_nb, style = "B") #matrice dei pesi spaziali in formato listw di tipo binario
+```
+
+### Test autocorrelazione
+
+```{r}
+#indice di Moran
+moran.test(MEDV, nn10w, zero.policy = TRUE,alternative = "greater")
+#indice di Geary
+geary.test(MEDV, nn10w,zero.policy = TRUE, alternative = "greater")
+```
+Autocorrelazione positiva perchè l'indice Moran è maggiore del valore atteso e, nel caso di Geary, il valore è inferiore rispetto alla suo valore atteso.
+
+
+```{r}
+#indice di Getis-Ord
+globalG.test(MEDV,nn10w_binary, zero.policy = TRUE,alternative = "greater") 
+#i pesi sono binari
+```
+Possiamo notare che l'indice G è maggiore del suo valore atteso, quindi vi sono potenziali HOT SPOTS. 
+
+```{r}
+# Moran ScatterPlot
+moran.plot(MEDV, nn10w, labels = NULL, xlab = NULL, ylab = NULL)
+```
+<br>Utilizziamo il Moran scatterplot per raffigurare graficamente le osservazioni. Notiamo che i punti sono concentrati nei quadranti high-high e low-low, questo a conferma di una autocorrelazione positiva. 
+
+
+### Applicazione modelli
+
+```{r}
+#modello di regressione lineare multipla
+reglin<-lm (log(MEDV) ~ CRIM + ZN + INDUS + CHAS + I(NOX^2)+AGE + TAX + PTRATIO + B + log(LSTAT))
+summary(reglin)
+AIC(reglin)
+```
+Le variabili sono tutte significative eccetto TAX e INDUS, un ottimo R-squared e un ANOVA eccellente. 
+
+```{r}
+#Jarque Bera test per analizzare la normalità degli errori
+jarque.bera.test(reglin$residuals)
+```
+Rifiutiamo l'ipotesi H0 quindi gli errori non si distribuiscono secondo la normale.
+
+```{r}
+#Breusch-Pagan
+bptest(reglin,studentize = TRUE)
+bptest(reglin,studentize = FALSE)
+```
+Osserviamo che siamo in presenza di eteroschedasticità
+
+```{r}
+#verifichiamo l'ipotesi di autocorrelazione dei residui con il test di Moran 
+#e con il Lagrange Multplier (LM)
+lm.morantest(reglin,nn10w,alternative = "two.sided")
+lm.LMtests(reglin, nn10w, test=c("LMerr", "LMlag", "RLMerr","RLMlag"))
+```
+Controllando i due test LMerr e LMlag non è possibile scegliere quello più adatto, per cui si procede con l'analisi delle versioni robuste di questi due test e si conclude che RLMerr ha un p-value più basso per cui il modello Spatial Error (SEM) è più efficiente.
+
+### Stima dei modelli
+
+```{r}
+#Spatial Autoregressive Model (SAM)
+Pure<-spautolm(log(MEDV) ~ CRIM + ZN + INDUS + CHAS + I(NOX^2)+AGE + TAX + 
+                 PTRATIO + B + log(LSTAT), 
+               data = boston, 
+               listw = nn10w)
+summary(Pure)
+
+```
+
+Il modello autoregressivo spaziale è di difficile interpretazione. Notiamo che il valore di lambda (rho sulle slide) è elevato, questo significa che c'è un'elevata autocorrelazione. 
+
+```{r}
+#Spatial Lag Model (SLM)
+Spatial_lag<-lagsarlm(log(MEDV) ~ CRIM + ZN + INDUS + CHAS + I(NOX^2)+AGE +
+                        TAX + PTRATIO + B + log(LSTAT), 
+                      data = boston, 
+                      listw = nn10w, 
+                      Durbin = FALSE, 
+                      tol.solve = 1e-14)
+summary(Spatial_lag)
+```
+
+Il modello spazialmente ritardato prevede un'influenza sulla variabile dipendente per merito delle regioni vicini. Osserviamo un rho maggiore di zero, quindi vi è dipendenza spaziale positiva.
+
+```{r}
+#Spatial Error Model (SEM)
+Spatial_Error<-errorsarlm((log(MEDV) ~ CRIM + ZN + INDUS + CHAS + I(NOX^2)+
+                             AGE + TAX + PTRATIO + B + log(LSTAT)), 
+                          data=boston, 
+                          listw=nn10w, 
+                          Durbin = FALSE,
+                          tol.solve=1e-14,
+                          zero.policy = TRUE)
+summary(Spatial_Error)
+```
+
+In questo modello l'influenza tra le regioni si manifesta come termine di errore poichè è un parametro di disturbo. 
+
+```{r}
+#Spatial Durbin Model (SDM)
+Spatial_Durbin<- lagsarlm((log(MEDV) ~ CRIM + ZN + INDUS + CHAS + I(NOX^2)+AGE + TAX + PTRATIO + B + log(LSTAT)), data=boston, listw=nn10w, Durbin = TRUE, tol.solve=1.0e-14, zero.policy = TRUE)
+summary(Spatial_Durbin)
+```
+
+
+```{r}
+#SARAR
+SARAR<- sacsarlm((log(MEDV) ~ CRIM + ZN + INDUS + CHAS + I(NOX^2)+AGE + TAX + PTRATIO + B + log(LSTAT)), data=boston,Durbin = FALSE, listw=nn10w,zero.policy = TRUE)
+summary(SARAR)
+```
+
+Il modello contempla gli effetti spaziali propri del modello spazialmente ritardato (SLM), dove la var. dip. è influenzata dalle unità vicine, ed anche effetti previsti dal modello con errori spazialmente autocorrelati (SEM), dove l'influenza è nei residui. Da un confronto dell'AIC con quello del Durbin si evince che la spiegazione dell'autocorrelazione dei residui non è così rilevante da migliorare la regressione.
+
+```{r}
+#Spatial Durbin Error Model (SDEM)
+SDEM<- errorsarlm((log(MEDV) ~ CRIM + ZN + INDUS + CHAS + I(NOX^2)+AGE + TAX + PTRATIO + B + log(LSTAT)), data=boston,listw=nn10w,Durbin = TRUE, tol.solve=1e-14,zero.policy = TRUE)
+summary(SDEM)
+```
+
+
+
+```{r}
+#Spatial Lag X (SLX)
+SLX<-lmSLX(log(MEDV) ~ CRIM + ZN + INDUS + CHAS + I(NOX^2)+AGE + TAX + PTRATIO + B + log(LSTAT), data=boston, listw=nn10w, Durbin = TRUE )
+summary(SLX)
+```
+
+
+
+```{r}
+#General Nesting Model (GNS)
+GNS<-sacsarlm(log(MEDV) ~ CRIM + ZN + INDUS + CHAS + I(NOX^2)+AGE + TAX + PTRATIO + B + log(LSTAT), data = boston, Durbin = TRUE, listw = nn10w)
+summary(GNS)
+```
+
+Include tutti i tipi di effetti di interazione.
+
+
+### Confronto modelli con AIC
+
+```{r}
+comp<-cbind(AIC(reglin),AIC(Pure),AIC(Spatial_lag),AIC(Spatial_Error),AIC(Spatial_Durbin),AIC(SARAR),AIC(SDEM),AIC(SLX),AIC(GNS))
+colnames(comp)<-c("reglin","Pure","Spatial Lag","Spatial Error","Spatial Durbin","SARAR","SDEM","SLX","GNS")
+round(comp,7)
+```
+
+Il modello con AIC più basso è lo Spatial Durbin (SDM)
+
+### Raffinamento modello
+
+```{r}
+#Spatial Durbin sena variabile ZN
+Spatial_Durbin_NO_ZN<-lagsarlm((log(MEDV) ~ CRIM + INDUS + CHAS + I(NOX^2)+AGE + TAX + PTRATIO + B + log(LSTAT)), data=boston, listw=nn10w, Durbin = TRUE, tol.solve=1.0e-14, zero.policy = TRUE)
+summary(Spatial_Durbin_NO_ZN)
+```
+
+I p-value sono divenuti in generale più significativi ma la variabile CHAS non spiega quasi nulla, procediamo con la rimozione.
+
+```{r} 
+#Spatial Durbin senza variabili ZN e CHAS 
+Spatial_Durbin_NO_ZN_CHAS<-lagsarlm((log(MEDV) ~ CRIM + INDUS + I(NOX^2)+AGE + TAX + PTRATIO + B + log(LSTAT)), data=boston, listw=nn10w, Durbin = TRUE, tol.solve=1.0e-14, zero.policy = TRUE)
+summary(Spatial_Durbin_NO_ZN_CHAS)
+
+```
+
+L'AIC è diminuito ulteriormente.
